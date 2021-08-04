@@ -30,32 +30,33 @@ namespace VerifyAddressPlugin
 
                 try
                 {
-                    var mySerializer = new XmlSerializer(typeof(AddressValidateResponse), new XmlRootAttribute("AddressValidateResponse"));
-                    AddressValidateResponse addressData = new AddressValidateResponse();
+                    var mySerializer = new XmlSerializer(typeof(AddressValidateRequest), new XmlRootAttribute("AddressValidateRequest"));
+                    var myDeserializer = new XmlSerializer(typeof(AddressValidateResponse), new XmlRootAttribute("AddressValidateResponse"));
+                    
+                    AddressValidateRequest addressData = new AddressValidateRequest();
 
                     logWithTimestamp(tracingService, "VerifyAddressPlugin: Business Logic start");
 
                     addressData.Address = new Address();
-                    addressData.Address.Error = new Error();
 
-                    logWithTimestamp(tracingService, "VerifyAddressPlugin: 1");
-                    addressData.Address.Address1 = entity["address1_line2"] as string;
-                    logWithTimestamp(tracingService, "VerifyAddressPlugin: 2");
+                    addressData.Address.Address1 = entity.Contains("address1_line2") ? entity["address1_line2"] as string : "";
                     addressData.Address.Address2 = entity["address1_line1"] as string;
-                    logWithTimestamp(tracingService, "VerifyAddressPlugin: 3");
                     addressData.Address.City = entity["address1_city"] as string;
-                    logWithTimestamp(tracingService, "VerifyAddressPlugin: 4");
                     addressData.Address.State = entity["address1_stateorprovince"] as string;
-                    logWithTimestamp(tracingService, "VerifyAddressPlugin: 5");
                     addressData.Address.Zip5 = entity["address1_postalcode"] as string;
+                    addressData.Address.Zip4 = "";
 
                     var xml = "";
 
                     using (var sww = new StringWriter())
                     {
-                        using (XmlWriter writer = XmlWriter.Create(sww))
+                        XmlWriterSettings settings = new XmlWriterSettings();
+                        settings.OmitXmlDeclaration = true;
+
+                        using (XmlWriter writer = XmlWriter.Create(sww, settings))
                         {
                             mySerializer.Serialize(writer, addressData);
+                            
                             xml = sww.ToString(); // Your XML
                         }
                     }
@@ -65,36 +66,27 @@ namespace VerifyAddressPlugin
                     Task<Stream> response = CallApi(xml);
                     response.Wait();
 
-                    // Call the Deserialize method and cast to the object type.
-                    var addressObject = mySerializer.Deserialize(response.Result) as AddressValidateResponse;
+                    logWithTimestamp(tracingService, $"VerifyAddressPlugin: Before Deserialization"); 
 
-                    //if (addressObject.Address?.Error?.Description != null)
-                    //{
-                    //    throw new InvalidPluginExecutionException($"Invalid Address. Please fix any errors and then try to save again.");
-                    //}
+                    // Call the Deserialize method and cast to the object type.
+                    var addressObject = myDeserializer.Deserialize(response.Result) as AddressValidateResponse;
+
+                    if (addressObject.Address?.Error?.Description != null)
+                    {
+                        throw new InvalidPluginExecutionException($"Invalid Address. Please fix any errors and then try to save again.");
+                    }
 
                     if (addressObject.Address?.ReturnText != null)
                     {
                         throw new InvalidPluginExecutionException($"{addressObject.Address.ReturnText}");
                     }
 
-                    //if (entity.Contains("address1_stateorprovince"))
-                    //{
-                    //    string stateInput = entity["address1_stateorprovince"].ToString().ToLower();
+                    entity["address1_line1"] = addressObject.Address.Address2;
+                    entity["address1_line2"] = addressObject.Address?.Address1;
+                    entity["address1_city"] = addressObject.Address.City;
+                    entity["address1_stateorprovince"] = addressObject.Address.State;
+                    entity["address1_postalcode"] = $"{addressObject.Address.Zip5}-{addressObject.Address.Zip4}";
 
-                    //    if (stateInput == "tx" || stateInput == "texas")
-                    //    {
-
-                    //        logWithTimestamp(tracingService, "Account created with TX");
-                    //    }
-                    //    else
-                    //    {
-                    //        Entity culprit = service.Retrieve("systemuser", context.InitiatingUserId, new ColumnSet("fullname"));
-
-                    //        logWithTimestamp(tracingService, $"{culprit["fullname"]} attempted account creation with state other than TX");
-                    //        throw new InvalidPluginExecutionException("You can only create accounts with the state of Texas (TX)");
-                    //    }
-                    //}
                 }
                 catch (FaultException<OrganizationServiceFault> ex)
                 {
@@ -128,16 +120,24 @@ namespace VerifyAddressPlugin
 
     }
 
+    [XmlRoot("AddressValidateRequest")]
+    public class AddressValidateRequest
+    {
+        [XmlAttribute]
+        public string USERID = "479IMPRO8097";
+
+        public Address Address { get; set; }
+    }
+
     [XmlRoot("AddressValidateResponse")]
     public class AddressValidateResponse
     {
-        [XmlElement("Address")]
         public Address Address { get; set; }
     }
 
     public class Address
     {
-        
+       
         public string Address1 { get; set; }
         public string Address2 { get; set; }
         public string City { get; set; }
@@ -145,18 +145,21 @@ namespace VerifyAddressPlugin
         public string Zip5 { get; set; }
         public string Zip4 { get; set; }
         public string ReturnText { get; set; }
-        
-        [XmlElement("Error")]
         public Error Error { get; set; }
 
     }
 
     public class Error
     {
+
         public string Number { get; set; }
+
         public string Source { get; set; }
+
         public string Description { get; set; }
+
         public string HelpFile { get; set; }
+
         public string HelpContext { get; set; }
     }
 }
