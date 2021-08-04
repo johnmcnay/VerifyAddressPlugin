@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 
 namespace VerifyAddressPlugin
 {
@@ -27,7 +28,7 @@ namespace VerifyAddressPlugin
 
                 IOrganizationServiceFactory serviceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 IOrganizationService service = serviceFactory.CreateOrganizationService(context.UserId);
-
+                
                 try
                 {
                     var mySerializer = new XmlSerializer(typeof(AddressValidateRequest), new XmlRootAttribute("AddressValidateRequest"));
@@ -39,13 +40,42 @@ namespace VerifyAddressPlugin
 
                     addressData.Address = new Address();
 
+                    if (context.MessageName == "Update")
+                    {
+                        logWithTimestamp(tracingService, $"VerifyAddressPlugin: {entity.Id}");
+
+                        var result = service.Retrieve("account", entity.Id,
+                            new ColumnSet("address1_line1", "address1_line2", "address1_city", "address1_stateorprovince", "address1_postalcode"));
+                        
+                        if (entity.Contains("address1_line2") == false)
+                        {
+                            entity.Attributes.Add("address1_line2", result.Contains("address1_line2") ? result["address1_line2"] : "");                            
+                        }
+                        if (entity.Contains("address1_line1") == false)
+                        {
+                            entity.Attributes.Add("address1_line1", result["address1_line1"]);
+                        }
+                        if (entity.Contains("address1_city") == false)
+                        {
+                            entity.Attributes.Add("address1_city", result["address1_city"]);
+                        }
+                        if (entity.Contains("address1_stateorprovince") == false)
+                        {
+                            entity.Attributes.Add("address1_stateorprovince", result["address1_stateorprovince"]);
+                        }
+                        if (entity.Contains("address1_postalcode") == false)
+                        {
+                            entity.Attributes.Add("address1_postalcode", result["address1_postalcode"]);
+                        }
+                    }
+
                     addressData.Address.Address1 = entity.Contains("address1_line2") ? entity["address1_line2"] as string : "";
                     addressData.Address.Address2 = entity["address1_line1"] as string;
                     addressData.Address.City = entity["address1_city"] as string;
                     addressData.Address.State = entity["address1_stateorprovince"] as string;
                     addressData.Address.Zip5 = entity["address1_postalcode"] as string;
                     addressData.Address.Zip4 = "";
-
+                    
                     var xml = "";
 
                     using (var sww = new StringWriter())
@@ -65,8 +95,6 @@ namespace VerifyAddressPlugin
 
                     Task<Stream> response = CallApi(xml);
                     response.Wait();
-
-                    logWithTimestamp(tracingService, $"VerifyAddressPlugin: Before Deserialization"); 
 
                     // Call the Deserialize method and cast to the object type.
                     var addressObject = myDeserializer.Deserialize(response.Result) as AddressValidateResponse;
