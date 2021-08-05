@@ -1,12 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net.Http;
+using System.Runtime.Serialization.Json;
 using System.ServiceModel;
 using System.Text;
 using System.Threading.Tasks;
-using System.Xml;
 using System.Xml.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -75,29 +74,54 @@ namespace VerifyAddressPlugin
                     addressData.Address.State = entity["address1_stateorprovince"] as string;
                     addressData.Address.Zip5 = entity["address1_postalcode"] as string;
                     addressData.Address.Zip4 = "";
-                    
-                    var xml = "";
 
-                    using (var sww = new StringWriter())
+                    string serializedResult;
+
+                    using (MemoryStream serializeMemoryStream = new MemoryStream())
                     {
-                        XmlWriterSettings settings = new XmlWriterSettings();
-                        settings.OmitXmlDeclaration = true;
+                        DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(AddressValidateRequest)); 
+                        //write newly created object(NewStudent) into memory stream
+                        serializer.WriteObject(serializeMemoryStream, addressData);
 
-                        using (XmlWriter writer = XmlWriter.Create(sww, settings))
-                        {
-                            mySerializer.Serialize(writer, addressData);
-                            
-                            xml = sww.ToString(); // Your XML
-                        }
+                        serializeMemoryStream.Position = 0;
+
+                        //use stream reader to read serialized data from memory stream
+                        StreamReader sr = new StreamReader(serializeMemoryStream);
+
+                        //get JSON data serialized in string format in string variable 
+                        serializedResult = sr.ReadToEnd();
+
+                        logWithTimestamp(tracingService, $"VerifyAddressPlugin: {serializedResult}");                        
                     }
-
-                    logWithTimestamp(tracingService, $"VerifyAddressPlugin: {xml}");
-
-                    Task<Stream> response = CallApi(xml);
+                    Task<Stream> response = CallApi(serializedResult);
                     response.Wait();
 
-                    // Call the Deserialize method and cast to the object type.
-                    var addressObject = myDeserializer.Deserialize(response.Result) as AddressValidateResponse;
+                    StreamReader reader = new StreamReader(response.Result);
+                    string json = reader.ReadToEnd();
+
+                    AddressValidateResponse addressObject;
+
+                    using (MemoryStream deserializeMemoryStream = new MemoryStream())
+                    {                       
+                        //initialize DataContractJsonSerializer object and pass Address class type to it
+                        DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(AddressValidateResponse), new DataContractJsonSerializerSettings
+                        {
+                            UseSimpleDictionaryFormat = true
+                        });
+
+                        deserializeMemoryStream.Position = 0;
+
+                        //user stream writer to write JSON string data to memory stream
+                        StreamWriter writer = new StreamWriter(deserializeMemoryStream);
+                        writer.Write(json);
+                        writer.Flush();
+
+                        deserializeMemoryStream.Position = 0;
+                        //get the Deserialized data in object of type Address
+                        addressObject = serializer.ReadObject(deserializeMemoryStream) as AddressValidateResponse;
+                    }
+
+                    logWithTimestamp(tracingService, $"VerifyAddressPlugin: {json} - {addressObject.Address.Address2}");
 
                     if (addressObject.Address?.Error?.Description != null)
                     {
@@ -129,14 +153,19 @@ namespace VerifyAddressPlugin
             }
         }
 
-        public async Task<Stream> CallApi(string xml)
+        public async Task<Stream> CallApi(string jsonPayload)
         {
 
             var client = new HttpClient();
+            var requestMessage = new HttpRequestMessage();
 
-            HttpResponseMessage response = await client.GetAsync("https://secure.shippingapis.com/ShippingAPI.dll?API=Verify&XML=" + $"{xml}");
+            requestMessage.RequestUri = new Uri("https://verifyaddressapi.azurewebsites.net/VerifyAddress");
+            requestMessage.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+            requestMessage.Method = HttpMethod.Post;
+
+            HttpResponseMessage response = await client.SendAsync(requestMessage).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            Stream responseStream = await response.Content.ReadAsStreamAsync();
+            Stream responseStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
 
             return responseStream;
         }

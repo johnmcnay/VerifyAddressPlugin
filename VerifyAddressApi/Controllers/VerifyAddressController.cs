@@ -41,8 +41,8 @@ namespace VerifyAddressApi.Controllers
             return;
         }
 
-        [HttpGet]
-        public JsonResult Get(AddressValidateRequest request)
+        [HttpPost]
+        public JsonResult Post(AddressValidateRequest request)
         {
             var mySerializer = new XmlSerializer(typeof(AddressValidateRequest), new XmlRootAttribute("AddressValidateRequest"));
             var myDeserializer = new XmlSerializer(typeof(AddressValidateResponse), new XmlRootAttribute("AddressValidateResponse"));
